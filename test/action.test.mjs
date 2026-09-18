@@ -37,15 +37,18 @@ async function runAction({ moveHead = false, staleEvent = false, modelFails = fa
         const project = JSON.stringify(JSON.parse(opts.body).state);
         if (modelFails === true || typeof modelFails === 'string' && project.includes(modelFails)) return new Response('sensitive provider detail', { status: 401 });
         const request = JSON.parse(opts.body);
+        assert.equal(JSON.stringify(request.state).includes('"stars"'), false);
+        assert.equal(JSON.stringify(request.state).includes('followers'), false);
         if (request.questions.file_0) {
           if (selectionFails === true || typeof selectionFails === 'string' && project.includes(selectionFails)) return new Response('context overflow', { status: 422 });
           return json({ model: 'jev-fixture', usage: { input_tokens: 8, output_tokens: 1 }, answers: Object.fromEntries(Object.keys(request.questions).map(id => [id, { type: 'noul', noul: 0.9 }])) });
         }
         return json({ model: 'jev-fixture', usage: { input_tokens: 12, output_tokens: 4 }, answers: { scope_match: { type: 'noul', noul: rejected && project.includes(rejected) ? 0.1 : uncertain && project.includes(uncertain) ? 0.5 : 0.95 }, category: { type: 'choice', choice: 'documentation', confidence: 0.9, probabilities: { documentation: 1, bugfix: 0, feature: 0, maintenance: 0, other: 0 } } } });
       }
+      if (url.startsWith('https://api.github.com/users/')) return json({ login: 'owner', type: 'User', followers: 5 });
       if (entries && !url.startsWith('https://api.github.com/repos/owner/catalog/')) {
         const repo = new URL(url).pathname.split('/')[3];
-        if (url.endsWith(`/owner/${repo}`)) return json({ private: false, full_name: `owner/${repo}`, default_branch: 'main', license: { spdx_id: 'MIT' } });
+        if (url.endsWith(`/owner/${repo}`)) return json({ private: false, full_name: `owner/${repo}`, default_branch: 'main', license: { spdx_id: 'MIT' }, stargazers_count: 12, owner: { login: 'owner' } });
         if (url.includes('/commits/')) return json({ sha: head });
         if (url.includes('/git/trees/')) return json({ tree: ['README.md', 'src/client.ts'].map((path, i) => ({ path, type: 'blob', mode: '100644', size: 100, sha: String(i + 1).repeat(40) })) });
         if (url.includes('/git/blobs/')) return json({ encoding: 'base64', content: Buffer.from('TypeSafe client https://api.typesafe.ai/v1/systemone').toString('base64') });
@@ -123,7 +126,10 @@ test('batch preserves independent judgments and one summary comment', async () =
   assert.equal(run.report.decision, 'not-recommended');
   assert.deepEqual(run.report.reports.map(r => [r.projectRepository, r.decision]), [['owner/alpha', 'recommended'], ['owner/beta', 'not-recommended'], ['owner/gamma', 'needs-review']]);
   assert.ok(run.report.reports.every(r => r.answers && r.sourceCommit === head && r.policyHash && r.evidence.length === 2));
-  assert.ok(run.report.reports.every(r => r.discovery.method === 'jev' && r.discovery.answers.file_0.noul === 0.9));
+  assert.ok(run.report.reports.every(r => r.listing.stars === 12 && r.listing.ownerFollowers === 5));
+  assert.match(run.writes[0].body, /12 stars/);
+  assert.match(run.writes[0].body, /author owner · 5 followers/);
+  assert.match(run.writes[0].body, /not a review criterion/);
   assert.equal(run.writes[0].body.split('<!-- jev-review-action:v1 -->').length, 2);
   assert.match(run.writes[0].body, /<details>/);
   assert.match(run.outputs, /category<<[^\n]+\n\n/);

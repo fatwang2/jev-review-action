@@ -17,6 +17,18 @@ export function renderComment(report) {
       lines.push(detail);
     }
   }
+  if (report.listing && (Number.isInteger(report.listing.stars) || report.listing.owner)) {
+    const bits = [];
+    if (Number.isInteger(report.listing.stars)) bits.push(`${report.listing.stars} ${report.listing.stars === 1 ? 'star' : 'stars'}`);
+    if (report.listing.owner) {
+      const kind = report.listing.ownerType === 'organization' ? 'organization' : 'author';
+      const follows = Number.isInteger(report.listing.ownerFollowers)
+        ? ` · ${report.listing.ownerFollowers} ${report.listing.ownerFollowers === 1 ? 'follower' : 'followers'}`
+        : '';
+      bits.push(`${kind} ${markdown(report.listing.owner)}${follows}`);
+    }
+    lines.push(`GitHub listing (not a review criterion): ${bits.join(' · ')}`, '');
+  }
   if (report.category) lines.push(`Suggested category: **${markdown(report.category)}** · category confidence: ${report.categoryConfidence.toFixed(2)}`, '');
   if (report.checks?.length) {
     lines.push('| Criterion | Probability of yes | Result |', '| --- | ---: | --- |');

@@ -19,7 +19,8 @@ function fixture(files, extra = []) {
   });
   const github = new GitHub('', async url => {
     const json = data => new Response(JSON.stringify(data));
-    if (url.endsWith('/repos/owner/project')) return json({ private: false, full_name: 'owner/project', default_branch: 'main', license: { spdx_id: 'MIT' } });
+    if (url.endsWith('/repos/owner/project')) return json({ private: false, full_name: 'owner/project', default_branch: 'main', license: { spdx_id: 'MIT' }, stargazers_count: 12, owner: { login: 'owner' } });
+    if (url.endsWith('/users/owner')) return json({ login: 'owner', type: 'User', followers: 5 });
     if (url.includes('/commits/')) return json({ sha });
     if (url.includes('/git/trees/')) return json({ truncated: false, tree: [...tree, ...extra] });
     if (url.includes('/git/blobs/')) {
