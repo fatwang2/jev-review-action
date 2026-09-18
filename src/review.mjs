@@ -12,6 +12,7 @@ export async function review({ policy, collected, submission, apiKey, model, fet
     ...result,
     ...decide(policy, result.answers, { warnings: collected.warnings, proposedCategory: submission?.category }),
     evidence: collected.evidence, warnings: collected.warnings,
+    ...(collected.listing ? { listing: collected.listing } : {}),
     ...(collected.discovery ? { discovery: collected.discovery } : {}),
   };
 }

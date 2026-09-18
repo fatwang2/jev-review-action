@@ -13,6 +13,10 @@ export class GitHub {
     invariant(path.startsWith('/repos/') && !path.includes('..') && !path.includes('\\'), 'Invalid GitHub API path');
     return jsonRequest(`https://api.github.com${path}`, { token: this.token, fetchImpl: this.fetchImpl, ...options });
   }
+  async user(login) {
+    invariant(typeof login === 'string' && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(login), 'Invalid GitHub login');
+    return jsonRequest(`https://api.github.com/users/${login}`, { token: this.token, fetchImpl: this.fetchImpl });
+  }
   async pull(repo, number) {
     repository(repo);
     invariant(Number.isInteger(number) && number > 0, 'Invalid pull request number');
@@ -75,6 +79,25 @@ function packageDependencyNames(content) {
   } catch { return []; }
 }
 
+function repositoryListing(metadata) {
+  const stars = Number.isInteger(metadata.stargazers_count) && metadata.stargazers_count >= 0 ? metadata.stargazers_count : null;
+  const owner = typeof metadata.owner?.login === 'string' ? metadata.owner.login : null;
+  return { stars, owner, ownerFollowers: null, ownerType: null };
+}
+
+async function withOwnerListing(github, listing) {
+  if (!listing.owner) return listing;
+  try {
+    const profile = await github.user(listing.owner);
+    return {
+      ...listing,
+      ownerFollowers: Number.isInteger(profile.followers) && profile.followers >= 0 ? profile.followers : null,
+      ownerType: profile.type === 'Organization' ? 'organization' : profile.type === 'User' ? 'user' : null,
+    };
+  } catch {
+    return listing;
+  }
+}
 function repositoryFacts(metadata, tree, cache) {
   const topLevel = [...new Set(tree.map(n => n.path.split('/')[0]).filter(Boolean))].sort().slice(0, 80);
   return {
@@ -160,9 +183,10 @@ export async function collectRepository(github, repo, requestedPaths = [], selec
   const discoverySummary = selection
     ? { ...selection, includedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) }
     : { scannedFiles: discovery.scannedFiles, scannedBytes: discovery.scannedBytes, failedFiles: discovery.failedFiles, candidateFiles: discovery.candidateFiles, selectedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) };
+  const listing = await withOwnerListing(github, repositoryListing(metadata));
   return {
     state: { repository: { name: metadata.full_name, description: metadata.description, license: metadata.license?.spdx_id ?? null, archived: metadata.archived, commit: sha }, facts: repositoryFacts(metadata, tree, cache), files: evidence },
-    evidence: evidence.map(({ content, ...source }) => source), warnings, sourceCommit: sha, discovery: discoverySummary,
+    listing, evidence: evidence.map(({ content, ...source }) => source), warnings, sourceCommit: sha, discovery: discoverySummary,
   };
 }
 

@@ -71,6 +71,8 @@ Each check is a positive yes/no criterion with `id`, `title`, `question`, `yes`,
 
 `recommended` is advisory, not a GitHub review approval. The action never merges, closes, edits submissions, or applies labels. Outputs let a caller implement additional behavior explicitly. Example thresholds are provisional: use human-labeled examples to measure false acceptance, false rejection, and category agreement before relying on them.
 
+Catalog comments also include GitHub star and owner-follower counts as maintainer context. These are not review criteria and are not sent to Jev.
+
 Changing the policy requires a separate maintainer PR. A catalog submission changing non-entry files, removing/renaming entries, or exceeding ten entries is rejected before inference.
 
 ### Batch catalog reviews (unreleased)

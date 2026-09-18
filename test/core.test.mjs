@@ -96,10 +96,11 @@ test('evidence is read at a commit and missing requested files force review', as
   const paths = [];
   const gh = new GitHub('', async url => {
     paths.push(url);
-    if (url.endsWith('/repos/owner/repo')) return json({ private: false, full_name: 'owner/repo', default_branch: 'main', license: { spdx_id: 'MIT' } });
+    if (url.endsWith('/repos/owner/repo')) return json({ private: false, full_name: 'owner/repo', default_branch: 'main', license: { spdx_id: 'MIT' }, stargazers_count: 1, owner: { login: 'owner' } });
     if (url.includes('/commits/')) return json({ sha });
     if (url.includes('/git/trees/')) return json({ truncated: false, tree: [{ path: 'README.md', type: 'blob', mode: '100644', size: 12, sha }] });
     if (url.includes('/git/blobs/')) return json({ encoding: 'base64', content: Buffer.from('README text').toString('base64') });
+    if (url.endsWith('/users/owner')) return json({ login: 'owner', type: 'Organization', followers: 80 });
     throw new Error('Unexpected request');
   });
   const result = await collectRepository(gh, 'owner/repo', ['src/missing.ts']);
@@ -110,6 +111,9 @@ test('evidence is read at a commit and missing requested files force review', as
   assert.ok(result.warnings.includes('Could not read evidence file: src/missing.ts'));
   assert.ok(result.warnings.some(w => w.includes('optional evidence field')));
   assert.ok(paths.every(p => p.startsWith('https://api.github.com/')));
+  assert.deepEqual(result.listing, { stars: 1, owner: 'owner', ownerFollowers: 80, ownerType: 'organization' });
+  assert.equal(result.state.repository.stars, undefined);
+  assert.ok(!JSON.stringify(result.state).includes('followers'));
 });
 
 test('private source repositories never reach Jev', async () => {
@@ -140,6 +144,12 @@ test('template escapes submissions rather than posting executable markup or ment
   assert.ok(body.startsWith(MARKER));
   assert.ok(!body.includes('<img')); assert.ok(!body.includes('@everyone'));
   assert.ok(!body.includes('\n## injected'));
+});
+
+test('listing stats appear in the comment and do not @mention the owner', () => {
+  const body = renderComment({ decision: 'needs-review', listing: { stars: 12, owner: 'ellipsis-dev', ownerFollowers: 5, ownerType: 'organization' } });
+  assert.match(body, /GitHub listing \(not a review criterion\): 12 stars · organization ellipsis-dev · 5 followers/);
+  assert.ok(!body.includes('@ellipsis-dev'));
 });
 
 test('generic PR policy and catalog policy use the same review engine', async () => {
