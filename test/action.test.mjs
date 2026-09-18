@@ -9,7 +9,7 @@ import { main } from '../src/index.mjs';
 const fixturePolicy = JSON.parse(await readFile(new URL('../examples/pull-request.json', import.meta.url)));
 const head = 'b'.repeat(40), newer = 'c'.repeat(40);
 
-async function runAction({ moveHead = false, staleEvent = false, modelFails = false, catalog = false, wrongCheckout = false, entries, entryFailure, rejected, uncertain, removed = false } = {}) {
+async function runAction({ moveHead = false, staleEvent = false, modelFails = false, catalog = false, wrongCheckout = false, entries, entryFailure, rejected, uncertain, removed = false, selectionFails = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'jev-action-test-'));
   const priorEnv = { ...process.env }, priorFetch = globalThis.fetch, priorExit = process.exitCode;
   const git = args => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -37,7 +37,10 @@ async function runAction({ moveHead = false, staleEvent = false, modelFails = fa
         const project = JSON.stringify(JSON.parse(opts.body).state);
         if (modelFails === true || typeof modelFails === 'string' && project.includes(modelFails)) return new Response('sensitive provider detail', { status: 401 });
         const request = JSON.parse(opts.body);
-        if (request.questions.file_0) return json({ model: 'jev-fixture', usage: { input_tokens: 8, output_tokens: 1 }, answers: Object.fromEntries(Object.keys(request.questions).map(id => [id, { type: 'noul', noul: 0.9 }])) });
+        if (request.questions.file_0) {
+          if (selectionFails === true || typeof selectionFails === 'string' && project.includes(selectionFails)) return new Response('context overflow', { status: 422 });
+          return json({ model: 'jev-fixture', usage: { input_tokens: 8, output_tokens: 1 }, answers: Object.fromEntries(Object.keys(request.questions).map(id => [id, { type: 'noul', noul: 0.9 }])) });
+        }
         return json({ model: 'jev-fixture', usage: { input_tokens: 12, output_tokens: 4 }, answers: { scope_match: { type: 'noul', noul: rejected && project.includes(rejected) ? 0.1 : uncertain && project.includes(uncertain) ? 0.5 : 0.95 }, category: { type: 'choice', choice: 'documentation', confidence: 0.9, probabilities: { documentation: 1, bugfix: 0, feature: 0, maintenance: 0, other: 0 } } } });
       }
       if (entries && !url.startsWith('https://api.github.com/repos/owner/catalog/')) {
@@ -57,7 +60,7 @@ async function runAction({ moveHead = false, staleEvent = false, modelFails = fa
       if (entries && url.includes('/git/trees/')) return json({ tree: entries.map((name, i) => ({ path: `entries/owner--${name}.json`, type: 'blob', mode: '100644', size: 200, sha: (i + 1).toString(16).repeat(40) })) });
       if (entries && url.includes('/git/blobs/')) {
         const name = entries[parseInt(url.split('/').at(-1)[0], 16) - 1];
-        return json({ encoding: 'base64', content: Buffer.from(name === entryFailure ? '{invalid' : JSON.stringify({ name, repository: `owner/${name}`, description: 'A concrete project.', category: 'documentation', evidence: ['src/client.ts'] })).toString('base64') });
+        return json({ encoding: 'base64', content: Buffer.from(name === entryFailure ? '{invalid' : JSON.stringify({ name, repository: `owner/${name}`, description: 'A concrete project.', category: 'documentation', ...(selectionFails ? {} : { evidence: ['src/client.ts'] }) })).toString('base64') });
       }
       if (url.includes('/files?')) return json(catalog ? [{ filename: 'entries/owner--project.json', status: 'added' }, { filename: '.github/workflows/review.yml', status: 'modified' }] : [{ filename: 'README.md', status: 'modified', patch: '@@ -1 +1 @@\n-old docs\n+new docs' }]);
       if (url.includes('/comments?')) return json([]);
@@ -68,6 +71,7 @@ async function runAction({ moveHead = false, staleEvent = false, modelFails = fa
       assert.equal(modelCalls, 0); assert.equal(writes.length, 0);
       return;
     }
+    process.exitCode = 0;
     await main();
     return { report: JSON.parse(await readFile(join(dir, 'report.json'))), outputs: await readFile(join(dir, 'output'), 'utf8'), writes, modelCalls, maxActiveModels, exitCode: process.exitCode };
   } finally {
@@ -155,4 +159,25 @@ test('batch results survive a stale-head check without publishing', async () => 
   assert.equal(run.report.decision, 'skipped');
   assert.equal(run.report.reports.length, 2);
   assert.equal(run.writes.length, 0);
+});
+
+test('source-selection overflow is a pipeline limit, not a red PR failure', async () => {
+  const run = await runAction({ entries: ['alpha'], selectionFails: true });
+  assert.equal(run.report.decision, 'needs-review');
+  assert.equal(run.report.errorKind, 'pipeline-limit');
+  assert.notEqual(run.exitCode, 1);
+  assert.match(run.report.reasons[0], /evidence/);
+  assert.equal(run.writes.length, 1);
+  assert.match(run.writes[0].body, /evidence/);
+});
+
+test('README-smuggling still fails red; selection overflow does not fail siblings', async () => {
+  const defect = await runAction({ catalog: true });
+  assert.equal(defect.report.decision, 'error');
+  assert.equal(defect.report.errorKind, 'pr-defect');
+  assert.equal(defect.exitCode, 1);
+  const run = await runAction({ entries: ['alpha', 'beta'], selectionFails: 'owner/alpha' });
+  assert.equal(run.report.decision, 'needs-review');
+  assert.notEqual(run.exitCode, 1);
+  assert.deepEqual(run.report.reports.map(r => r.decision), ['needs-review', 'recommended']);
 });

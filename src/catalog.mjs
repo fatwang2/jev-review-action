@@ -2,6 +2,7 @@ import { collectRepository } from './github.mjs';
 import { review } from './review.mjs';
 import { hash } from './policy.mjs';
 import { entryFilename, invariant, repository, validateEntry } from './validation.mjs';
+import { classifyReviewError } from './errors.mjs';
 
 export async function reviewCatalog({ files, pull, github, policy, context, apiKey, model }) {
   const entries = files.filter(file => file.filename.startsWith(`${policy.entryDirectory}/`));
@@ -23,7 +24,7 @@ export async function reviewCatalog({ files, pull, github, policy, context, apiK
         const collected = await collectRepository(github, submission.repository, submission.evidence, { apiKey, model });
         reports[index] = await review({ policy, collected, submission, apiKey, model, context: entryContext });
       } catch (error) {
-        reports[index] = { schemaVersion: 1, ...entryContext, policyHash: hash(policy), reviewedAt: new Date().toISOString(), decision: 'error', reasons: [error.message] };
+        reports[index] = { schemaVersion: 1, ...entryContext, policyHash: hash(policy), reviewedAt: new Date().toISOString(), ...classifyReviewError(error) };
       }
     }
   }

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { GitHub, collectRepository } from '../src/github.mjs';
 import { validateEntry } from '../src/validation.mjs';
 import { decide } from '../src/policy.mjs';
+import { SOURCE_LIMIT_REMEDY } from '../src/errors.mjs';
 import { readFileSync } from 'node:fs';
 
 const policy = JSON.parse(readFileSync(new URL('../examples/catalog.json', import.meta.url)));
@@ -138,4 +139,42 @@ test('over-budget full files are omitted explicitly and do not hide smaller late
   const result = await collectRepository(github, 'owner/project', ['src/client.ts']);
   assert.deepEqual(result.evidence.map(f => f.path), ['src/client.ts']);
   assert.match(result.warnings.join(' '), /Full file omitted.*README/);
+});
+
+test('repository facts include action.yml without reading it as evidence', async () => {
+  const { github, reads } = fixture({
+    'README.md': 'Bundled GitHub Action.',
+    'action.yml': 'name: Demo\nruns:\n  using: node20\n',
+    'src/client.ts': 'client.system_one();',
+    'package.json': '{"dependencies":{"@typesafe-ai/sdk":"1.0.0"},"devDependencies":{"x":"1"}}',
+  });
+  const result = await collectRepository(github, 'owner/project', [], {
+    apiKey: 'fixture', model: 'jev-fixture', fetchImpl: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      return new Response(JSON.stringify({
+        model: 'jev-fixture', usage: { input_tokens: 1, output_tokens: 1 },
+        answers: Object.fromEntries(Object.keys(request.questions).map(id => [id, { type: 'noul', noul: 0.9 }])),
+      }));
+    },
+  });
+  assert.equal(result.state.facts.githubAction, true);
+  assert.equal(result.state.facts.license, 'MIT');
+  assert.ok(result.state.facts.topLevel.includes('action.yml'));
+  assert.deepEqual(result.state.facts.packageDependencies, ['@typesafe-ai/sdk']);
+  assert.ok(!reads.includes('action.yml'));
+  assert.ok(!result.state.files.some(file => file.path === 'action.yml'));
+});
+
+test('selection overflow without evidence is a pipeline limit; supplied evidence continues', async () => {
+  const files = { 'README.md': 'Run it', 'src/client.ts': 'client.system_one();' };
+  const fail = async () => new Response('', { status: 422 });
+  await assert.rejects(collectRepository(fixture(files).github, 'owner/project', [], { apiKey: 'fixture', model: 'jev-fixture', fetchImpl: fail }), error => {
+    assert.equal(error.pipelineLimit, true);
+    assert.match(error.message, /HTTP 422/);
+    return true;
+  });
+  const result = await collectRepository(fixture(files).github, 'owner/project', ['src/client.ts'], { apiKey: 'fixture', model: 'jev-fixture', fetchImpl: fail });
+  assert.ok(result.warnings.includes(SOURCE_LIMIT_REMEDY));
+  assert.ok(result.evidence.some(file => file.path === 'src/client.ts'));
+  assert.equal(result.discovery.failed, true);
 });

@@ -52,8 +52,6 @@ async function main() {
       const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8'));
       if (snapshot.repository !== repository) throw new Error('Snapshot repository mismatch');
       const questions = selectionQuestions(snapshot.state.candidates);
-      // Reject rather than truncate inputs. This byte guard is not an exact model tokenizer.
-      if (Buffer.byteLength(JSON.stringify(snapshot.state)) > 65000 || Object.keys(questions).length > 200) throw new Error(`Experiment input needs explicit budget review: ${repository}`);
       const result = await evaluate({ apiKey: process.env.TYPESAFE_API_KEY, model: 'jev-1.13.0', state: snapshot.state, questions });
       const selected = selectedPaths(snapshot.state.candidates, result.answers);
       await save(reportPath, { repository, sourceCommit: snapshot.sourceCommit, selectedPaths: selected, selectedBytes: selected.reduce((n, path) => n + Buffer.byteLength(snapshot.sources[path]), 0), questions, ...result });

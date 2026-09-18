@@ -8,6 +8,7 @@ import { GitHub, collectRepository, collectPullRequest } from '../src/github.mjs
 import { jsonRequest } from '../src/http.mjs';
 import { renderComment, MARKER } from '../src/render.mjs';
 import { review } from '../src/review.mjs';
+import { classifyReviewError, SOURCE_LIMIT_REMEDY } from '../src/errors.mjs';
 
 const policy = JSON.parse(readFileSync(new URL('../examples/catalog.json', import.meta.url)));
 const clone = x => structuredClone(x);
@@ -103,6 +104,8 @@ test('evidence is read at a commit and missing requested files force review', as
   });
   const result = await collectRepository(gh, 'owner/repo', ['src/missing.ts']);
   assert.equal(result.sourceCommit, sha);
+  assert.equal(result.state.facts.githubAction, false);
+  assert.deepEqual(result.state.facts.topLevel, ['README.md']);
   assert.match(result.evidence[0].url, new RegExp(sha));
   assert.ok(result.warnings.includes('Could not read evidence file: src/missing.ts'));
   assert.ok(result.warnings.some(w => w.includes('optional evidence field')));
@@ -144,4 +147,11 @@ test('generic PR policy and catalog policy use the same review engine', async ()
   const out = await review({ policy: p, apiKey: 'test', collected: { state: { changes: [] }, evidence: [], warnings: [], sourceCommit: sha }, fetchImpl: async () => json({ model: 'jev-test-fixture', usage: { input_tokens: 50, output_tokens: 10 }, answers: { scope_match: { type: 'noul', noul: 0.9 }, category: { type: 'choice', choice: 'documentation', confidence: 0.9, probabilities: { documentation: 1, bugfix: 0, feature: 0, maintenance: 0, other: 0 } } } }) });
   assert.equal(out.decision, 'recommended'); assert.equal(out.category, 'documentation');
   assert.equal(out.policyHash.length, 64); assert.equal(out.stateHash.length, 64);
+});
+
+test('review errors distinguish PR defects from pipeline limits', () => {
+  assert.equal(classifyReviewError(new Error('Submit 1–10 entry files per PR, without workflow, policy, or generated-file changes')).errorKind, 'pr-defect');
+  assert.equal(classifyReviewError(new Error('api.typesafe.ai returned HTTP 422')).decision, 'needs-review');
+  assert.deepEqual(classifyReviewError(new Error('api.typesafe.ai returned HTTP 422')).reasons, [SOURCE_LIMIT_REMEDY]);
+  assert.equal(classifyReviewError(new Error('api.typesafe.ai returned HTTP 401')).errorKind, 'infra');
 });
