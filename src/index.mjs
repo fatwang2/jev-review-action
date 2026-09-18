@@ -3,10 +3,11 @@ import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { GitHub, collectRepository, collectPullRequest } from './github.mjs';
+import { GitHub, collectPullRequest } from './github.mjs';
 import { validatePolicy } from './policy.mjs';
-import { validateEntry, entryFilename, invariant, repository } from './validation.mjs';
+import { invariant, repository } from './validation.mjs';
 import { review } from './review.mjs';
+import { reviewCatalog } from './catalog.mjs';
 import { MARKER, renderComment } from './render.mjs';
 
 const input = name => process.env[`INPUT_${name.toUpperCase()}`] ?? '';
@@ -39,21 +40,10 @@ export async function main() {
     invariant(pull.state === 'open', 'PR is no longer open');
     const files = await github.changedFiles(repo, number);
     invariant(files.length === pull.changed_files, 'Incomplete PR file list');
-    let submission, collected;
+    const options = { policy, apiKey: input('typesafe-api-key'), model: input('model') || 'jev-latest', context };
     if (policy.mode === 'catalog') {
-      const entries = files.filter(f => f.filename.startsWith(`${policy.entryDirectory}/`));
-      if (!entries.length) report = { ...context, decision: 'skipped', reasons: ['This PR does not change catalog entries'] };
-      else {
-        invariant(entries.length === 1 && files.length === 1, 'Submit exactly one entry file per PR, without workflow, policy, or generated-file changes');
-        const file = entries[0];
-        invariant(['added', 'modified'].includes(file.status), 'Removal or rename requires manual maintenance review');
-        const treeRepo = repository(pull.head.repo.full_name);
-        submission = validateEntry(await github.entryAt(treeRepo, pull.head.sha, file.filename), policy.categories);
-        invariant(file.filename === `${policy.entryDirectory}/${entryFilename(submission.repository)}`, 'Entry filename must match owner--repository.json in lowercase');
-        collected = await collectRepository(github, submission.repository, submission.evidence);
-      }
-    } else collected = collectPullRequest(pull, files);
-    if (!report) report = await review({ policy, collected, submission, apiKey: input('typesafe-api-key'), model: input('model') || 'jev-latest', context });
+      report = await reviewCatalog({ ...options, files, pull, github });
+    } else report = await review({ ...options, collected: collectPullRequest(pull, files) });
   } catch (error) {
     report = { ...context, decision: 'error', reasons: [error.message], reviewedAt: new Date().toISOString() };
   }

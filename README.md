@@ -12,7 +12,7 @@ An independent personal open-source project by [fatwang2](https://github.com/fat
 
 | Mode | Evidence | Example |
 | --- | --- | --- |
-| `catalog` | One submitted JSON entry, a public GitHub repository's README and selected source files at an immutable commit | Awesome lists, integration directories, project showcases |
+| `catalog` | 1–10 submitted JSON entries, each with its public GitHub repository's README and source files at an immutable commit | Awesome lists, integration directories, project showcases |
 | `pull-request` | PR title, body and changed-file patches | Scope checks and change classification for an ordinary repository |
 
 Policies are JSON. The action does not hardcode Jev ecosystem criteria: replace the categories and questions to review another topic. Examples: [catalog policy](examples/catalog.json), [PR policy](examples/pull-request.json).
@@ -71,11 +71,21 @@ Each check is a positive yes/no criterion with `id`, `title`, `question`, `yes`,
 
 `recommended` is advisory, not a GitHub review approval. The action never merges, closes, edits submissions, or applies labels. Outputs let a caller implement additional behavior explicitly. Example thresholds are provisional: use human-labeled examples to measure false acceptance, false rejection, and category agreement before relying on them.
 
-Changing the policy requires a separate maintainer PR. A catalog submission changing anything except its one entry file is rejected before inference.
+Changing the policy requires a separate maintainer PR. A catalog submission changing non-entry files, removing/renaming entries, or exceeding ten entries is rejected before inference.
+
+### Batch catalog reviews (unreleased)
+
+Batch support requires the commit containing this change; the v0.2.0 quick-start pin above still accepts only one entry. Publish the updated Action and pin its immutable commit before enabling batch submissions in a consumer.
+
+Each project gets independent evidence collection and a separate Jev call, with at most two projects processed concurrently. One invalid entry or provider failure does not discard sibling results. One comment contains a summary table and expandable per-project details; oversized details remain available in the JSON report.
+
+The batch decision has precedence `error` → `not-recommended` → `needs-review` → `recommended`. Only an all-recommended batch is recommended; any error fails the Action. This is not majority voting or automatic merge enforcement. GitHub merges the entire PR, so resolve, remove, or split unresolved entries before merging.
+
+Single-entry reports retain `schemaVersion: 1` and their existing top-level fields. Multi-entry reports use `schemaVersion: 2`, with ordered `reports` containing each entry's full result, `entryPath`, and (when valid) `projectRepository`. The top-level `repository` remains the PR host repository. Batch `category` output is empty; categories belong to individual results. Every rerun reviews all entries again; results are not cached. Reports remain Actions artifacts with the caller's retention period, not a permanent archive.
 
 ## Catalog entry
 
-Use `entries/owner--repository.json` (lowercase). Submit one entry per PR:
+Use `entries/owner--repository.json` (lowercase). Submit one file per project, up to ten projects per PR with batch support:
 
 ```json
 {
@@ -109,7 +119,7 @@ At most ten text excerpts and 48,000 file-content characters reach Jev. Truncate
 
 Outputs: `decision`, `category`, and `report-path`. The JSON report includes raw typed answers, token usage, resolved model, source commit, PR head, policy/state hashes, thresholds, evidence URLs and follow-up reasons. It does not contain the API key or complete source files. Changing a threshold can be evaluated against saved answers without another provider call.
 
-Every run costs provider tokens; each successful review normally uses one batched Jev call. Only transient HTTP failures retry, at most twice. GitHub file counts, evidence size, request timeouts, and question counts are bounded. No API keys are needed for CI tests.
+Every run costs provider tokens; each project normally uses one Jev call containing its checks and category question. Only transient HTTP failures retry, at most twice. GitHub file counts, evidence size, request timeouts, and question counts are bounded. No API keys are needed for CI tests.
 
 ## Local review
 

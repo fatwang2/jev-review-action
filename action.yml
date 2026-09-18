@@ -25,9 +25,9 @@ inputs:
     default: jev-report.json
 outputs:
   decision:
-    description: recommended, needs-review, not-recommended, error, or skipped.
+    description: recommended, needs-review, not-recommended, error, or skipped. Batches recommend only when every entry recommends.
   category:
-    description: Suggested category ID, if evaluation completed.
+    description: Suggested category ID for a single evaluation; empty for multi-entry batches.
   report-path:
     description: Absolute path of the JSON report.
 runs:
