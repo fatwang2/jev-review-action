@@ -1,0 +1,35 @@
+name: Jev Review and Classify
+description: Review GitHub submissions and classify pull requests with configurable Jev judgments and evidence links.
+author: fatwang2
+branding:
+  icon: check-circle
+  color: blue
+inputs:
+  typesafe-api-key:
+    description: TypeSafe API key. Only sent to api.typesafe.ai.
+    required: true
+  github-token:
+    description: GitHub token with contents read and pull-requests write permissions.
+    default: ${{ github.token }}
+  policy:
+    description: Path to a trusted JSON policy from the base branch checkout.
+    default: .github/jev-review.json
+  model:
+    description: TypeSafe model ID. Pin a version for reproducible comparisons.
+    default: jev-latest
+  comment:
+    description: Create or update one bot comment on the pull request.
+    default: 'true'
+  report-path:
+    description: JSON report path, relative to the workspace.
+    default: jev-report.json
+outputs:
+  decision:
+    description: recommended, needs-review, not-recommended, error, or skipped.
+  category:
+    description: Suggested category ID, if evaluation completed.
+  report-path:
+    description: Absolute path of the JSON report.
+runs:
+  using: node24
+  main: src/index.mjs

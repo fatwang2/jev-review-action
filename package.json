@@ -1,0 +1,14 @@
+{
+  "name": "jev-review-action",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Configurable GitHub review and classification using TypeSafe Jev, without a text-generation model.",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.mjs && node --test",
+    "review": "node bin/review.mjs"
+  }
+}

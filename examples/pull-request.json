@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "mode": "pull-request",
+  "title": "Pull request scope review",
+  "scope": "Classify repository changes and check whether the PR explanation matches its diff. This is not a security audit or a replacement for tests.",
+  "categories": {
+    "documentation": "Changes primarily to documentation and examples",
+    "bugfix": "Changes correcting an existing behavior",
+    "feature": "Changes adding a new capability",
+    "maintenance": "Dependency, CI, formatting, or internal maintenance changes",
+    "other": "Mixed, unclear, or insufficient evidence"
+  },
+  "categoryConfidence": 0.7,
+  "checks": [
+    {
+      "id": "scope_match", "title": "Changes match PR explanation",
+      "question": "Do the supplied PR changes match the purpose described in pullRequest.title and pullRequest.body, without material unrelated changes?",
+      "yes": "The available diff implements or documents the described purpose without a material unrelated change",
+      "no": "The actual changes conflict with the explanation or contain material unrelated changes",
+      "accept": 0.8, "reject": 0.2
+    }
+  ]
+}

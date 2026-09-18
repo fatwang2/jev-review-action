@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+node_modules/
+reports/
+jev-report.json
+.DS_Store
