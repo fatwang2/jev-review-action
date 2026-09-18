@@ -44,7 +44,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - uses: fatwang2/jev-review-action@v0.1.0
+      - uses: fatwang2/jev-review-action@v0.2.0
         id: review
         with:
           typesafe-api-key: ${{ secrets.TYPESAFE_API_KEY }}
@@ -64,7 +64,7 @@ External fork submissions work through `pull_request_target`. Never check out, i
 Each check is a positive yes/no criterion with `id`, `title`, `question`, `yes`, `no`, `accept`, and `reject`. All checks are required. One `Choice` question selects among `categories`, which must include `other`. Set `categoryConfidence` to your review boundary.
 
 - **recommended:** all checks pass, a category is supported, and evidence is complete within the configured collector.
-- **needs-review:** ambiguous answers, category disagreement, missing/truncated requested evidence, archive status, or an unrecognized license.
+- **needs-review:** ambiguous answers, category disagreement, missing/truncated integration evidence, archive status, or an unrecognized license.
 - **not-recommended:** at least one check fails, with no evidence collection warning.
 - **error:** invalid submission, API failure, or invalid model response; the action fails and does not approve anything.
 - **skipped:** no catalog entry changed, or the PR changed/closed before publication.
@@ -82,14 +82,19 @@ Use `entries/owner--repository.json` (lowercase). Submit one entry per PR:
   "name": "Example project",
   "repository": "owner/repository",
   "description": "A concrete description whose claims can be checked against source.",
-  "category": "search",
-  "evidence": ["README.md", "src/search.ts"]
+  "category": "search"
 }
 ```
 
+`evidence` is optional. Omit it (or use `[]`) to let the Action find integration source files. If you know the relevant files, add up to six relative paths, for example `"evidence": ["src/client.ts"]`. Supplied paths still receive strict validation and priority.
+
 The file name is the canonical repository identity and prevents duplicate filenames. The directory's own validation should also check its full catalog for duplicates. Only public GitHub source repositories are supported in catalog mode. Non-GitHub projects and arbitrary webpages need a future evidence adapter, not unrestricted URL fetching.
 
-The collector resolves the submitted repository's default branch to a commit, reads its root README, up to six requested evidence paths, root manifests, and limited Jev/TypeSafe-named source files. It fetches at most ten text files and sends at most 48,000 file-content characters. It does not inspect an entire repository or prove that a project works. Source links in the comment identify files inspected, not model-generated citations to a specific claim. You can request additional evidence or review the full source manually.
+The collector resolves the submitted repository's default branch to an immutable commit. It reads the root README, up to six optional evidence paths, and up to two root manifests, then follows source references and prioritizes likely entrypoints, clients, and Jev/TypeSafe-related paths. Automatic discovery inspects at most 24 additional source files and 512 KB of declared blob sizes; each file is limited to 100 KB. Dependencies, generated output, tests, fixtures, symlinks, and submodules are excluded from automatic candidates. Explicit evidence can still point to a regular supported test or example file.
+
+Provider URLs, SDK imports, and model IDs are retrieval hints, not proof of integration. Jev makes the semantic judgment. The default discovery hints target TypeSafe/Jev; directories about other ecosystems should supply explicit evidence paths. If discovery finds no integration source and no readable source path was supplied, the result requires maintainer review and asks the contributor to add paths. A README claim alone cannot bypass that fallback.
+
+At most ten text excerpts and 48,000 file-content characters reach Jev. Truncated integration evidence requires manual review. The report includes discovery counts and selected paths. Discovery is bounded and may miss code; it does not inspect an entire repository or prove that a project works. Source links identify files inspected, not model-generated citations to individual claims.
 
 ## Inputs and outputs
 

@@ -1,5 +1,6 @@
 import { jsonRequest } from './http.mjs';
 import { invariant, repository, relativePath } from './validation.mjs';
+import { discoverSources, sourceExtension } from './discovery.mjs';
 
 export const encodePath = path => relativePath(path).split('/').map(part => encodeURIComponent(part).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)).join('/');
 const shaPattern = /^[0-9a-f]{40}$/;
@@ -57,7 +58,7 @@ export class GitHub {
 }
 
 const manifests = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile']);
-const textExtension = /\.(?:md|mdx|txt|json|[cm]?js|jsx|ts|tsx|py|rs|go|rb|toml|ya?ml)$/i;
+const textExtension = /\.(?:md|mdx|rst|txt|json|[cm]?js|jsx|ts|tsx|py|rs|go|rb|java|kt|swift|php|cs|toml|ya?ml)$/i;
 
 export async function collectRepository(github, repo, requestedPaths = []) {
   repository(repo);
@@ -68,39 +69,56 @@ export async function collectRepository(github, repo, requestedPaths = []) {
   const tree = await github.tree(repo, sha);
   const regular = tree.filter(n => n.type === 'blob' && ['100644', '100755'].includes(n.mode));
   const readme = regular.find(n => /^readme(?:\.md|\.txt|\.rst)?$/i.test(n.path));
-  const paths = [...new Set([
+  const initialPaths = [...new Set([
     ...(readme ? [readme.path] : []),
     ...requestedPaths,
     ...regular.filter(n => manifests.has(n.path)).slice(0, 2).map(n => n.path),
-    ...regular.filter(n => textExtension.test(n.path) && /(?:^|\/)[^/]*(?:jev|typesafe)[^/]*\.(?:[cm]?js|ts|py|rs|go|rb)$/i.test(n.path)).slice(0, 2).map(n => n.path),
-  ])].slice(0, 10);
-  const evidence = [];
+  ])];
   const warnings = [];
   if (!readme) warnings.push('No root README found');
   if (metadata.archived) warnings.push('Repository is archived');
   if (!metadata.license?.spdx_id || metadata.license.spdx_id === 'NOASSERTION') warnings.push('GitHub could not identify a license; check it manually');
+  const cache = new Map();
+  const attempted = new Set();
+  const read = async node => {
+    if (!cache.has(node.path)) cache.set(node.path, await github.blob(repo, node));
+    return cache.get(node.path);
+  };
+  for (const path of initialPaths) {
+    relativePath(path);
+    attempted.add(path);
+    if (!textExtension.test(path) && !manifests.has(path)) { warnings.push(`Unsupported evidence file: ${path}`); continue; }
+    try { await read(tree.find(n => n.path === path)); }
+    catch { warnings.push(`Could not read evidence file: ${path}`); }
+  }
+  const discovery = await discoverSources({
+    nodes: regular.filter(n => !attempted.has(n.path)),
+    seeds: [...cache].map(([path, content]) => ({ path, content })), read,
+  });
+  const discoveredPaths = discovery.matches.map(s => s.path);
+  const paths = [...new Set([...initialPaths, ...discoveredPaths])].slice(0, 10);
+  const evidence = [];
   let budget = 48_000;
   for (const path of paths) {
-    relativePath(path);
-    if (!textExtension.test(path) && !manifests.has(path)) { warnings.push(`Unsupported evidence file: ${path}`); continue; }
+    const content = cache.get(path);
+    if (content === undefined) continue;
+    const limit = Math.min(path === readme?.path ? 14_000 : 8000, budget);
+    if (limit <= 0) { warnings.push('Evidence budget exhausted'); break; }
+    const excerpt = content.slice(0, limit);
+    const truncated = excerpt.length < content.length;
+    if (truncated && (requestedPaths.includes(path) || sourceExtension.test(path))) warnings.push(`Evidence was truncated: ${path}; supply a smaller integration file in evidence or review the full source manually`);
     const node = tree.find(n => n.path === path);
-    try {
-      const content = await github.blob(repo, node);
-      const limit = Math.min(path === readme?.path ? 14_000 : 8000, budget);
-      const excerpt = content.slice(0, limit);
-      if (limit <= 0) { warnings.push('Evidence budget exhausted'); break; }
-      const truncated = excerpt.length < content.length;
-      if (truncated && requestedPaths.includes(path)) warnings.push(`Requested evidence was truncated: ${path}`);
-      evidence.push({ path, url: `https://github.com/${repo}/blob/${sha}/${encodePath(path)}`, sha: node.sha, truncated, content: excerpt });
-      budget -= excerpt.length;
-    } catch {
-      warnings.push(`Could not read evidence file: ${path}`);
-    }
+    evidence.push({ path, url: `https://github.com/${repo}/blob/${sha}/${encodePath(path)}`, sha: node.sha, truncated, content: excerpt });
+    budget -= excerpt.length;
   }
+  const suppliedSource = evidence.some(s => requestedPaths.includes(s.path) && sourceExtension.test(s.path));
+  const discoveredSource = evidence.some(s => sourceExtension.test(s.path) && discoveredPaths.includes(s.path));
+  if (!suppliedSource && !discoveredSource) warnings.push('Automatic discovery could not find enough integration source evidence. Add 1–6 relative source file paths in the optional evidence field so a maintainer can review the integration.');
   invariant(evidence.length > 0, 'No readable repository evidence');
+  const discoverySummary = { scannedFiles: discovery.scannedFiles, scannedBytes: discovery.scannedBytes, failedFiles: discovery.failedFiles, candidateFiles: discovery.candidateFiles, selectedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) };
   return {
     state: { repository: { name: metadata.full_name, description: metadata.description, license: metadata.license?.spdx_id ?? null, archived: metadata.archived, commit: sha }, files: evidence },
-    evidence: evidence.map(({ content, ...source }) => source), warnings, sourceCommit: sha,
+    evidence: evidence.map(({ content, ...source }) => source), warnings, sourceCommit: sha, discovery: discoverySummary,
   };
 }
 

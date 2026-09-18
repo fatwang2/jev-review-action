@@ -45,9 +45,11 @@ export function validateEntry(value, categories) {
   text(value.description, 'entry description', 350);
   invariant(!/[\r\n]/.test(value.description), 'Entry description must be one line');
   invariant(Object.hasOwn(categories, value.category) && value.category !== 'other', 'Entry category must be a configured category other than other');
-  invariant(Array.isArray(value.evidence) && value.evidence.length >= 1 && value.evidence.length <= 6, 'Entry needs 1–6 evidence file paths');
-  value.evidence.forEach(relativePath);
-  invariant(new Set(value.evidence).size === value.evidence.length, 'Duplicate evidence file path');
+  if (value.evidence !== undefined) {
+    invariant(Array.isArray(value.evidence) && value.evidence.length <= 6, 'Optional evidence must contain at most 6 file paths');
+    value.evidence.forEach(relativePath);
+    invariant(new Set(value.evidence).size === value.evidence.length, 'Duplicate evidence file path');
+  }
   return value;
 }
 

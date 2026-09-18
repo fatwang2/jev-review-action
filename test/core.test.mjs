@@ -104,7 +104,8 @@ test('evidence is read at a commit and missing requested files force review', as
   const result = await collectRepository(gh, 'owner/repo', ['src/missing.ts']);
   assert.equal(result.sourceCommit, sha);
   assert.match(result.evidence[0].url, new RegExp(sha));
-  assert.deepEqual(result.warnings, ['Could not read evidence file: src/missing.ts']);
+  assert.ok(result.warnings.includes('Could not read evidence file: src/missing.ts'));
+  assert.ok(result.warnings.some(w => w.includes('optional evidence field')));
   assert.ok(paths.every(p => p.startsWith('https://api.github.com/')));
 });
 
