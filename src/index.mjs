@@ -9,6 +9,7 @@ import { invariant, repository } from './validation.mjs';
 import { review } from './review.mjs';
 import { reviewCatalog } from './catalog.mjs';
 import { MARKER, renderComment } from './render.mjs';
+import { classifyReviewError } from './errors.mjs';
 
 const input = name => process.env[`INPUT_${name.toUpperCase()}`] ?? '';
 const contained = (root, path) => { const rel = relative(root, path); return rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel); };
@@ -45,7 +46,7 @@ export async function main() {
       report = await reviewCatalog({ ...options, files, pull, github });
     } else report = await review({ ...options, collected: collectPullRequest(pull, files) });
   } catch (error) {
-    report = { ...context, decision: 'error', reasons: [error.message], reviewedAt: new Date().toISOString() };
+    report = { ...context, ...classifyReviewError(error), reviewedAt: new Date().toISOString() };
   }
   const current = await github.pull(repo, number);
   if (current.head.sha !== context.headSha || current.state !== 'open') {

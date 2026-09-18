@@ -2,6 +2,7 @@ import { jsonRequest } from './http.mjs';
 import { invariant, repository, relativePath } from './validation.mjs';
 import { discoverSources, sourceExtension } from './discovery.mjs';
 import { selectSources } from './selection.mjs';
+import { classifyReviewError, pipelineLimit, SOURCE_LIMIT_REMEDY } from './errors.mjs';
 
 export const encodePath = path => relativePath(path).split('/').map(part => encodeURIComponent(part).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)).join('/');
 const shaPattern = /^[0-9a-f]{40}$/;
@@ -25,7 +26,7 @@ export class GitHub {
   async tree(repo, sha) {
     invariant(shaPattern.test(sha), 'Expected an immutable commit SHA');
     const tree = await this.request(`/repos/${repository(repo)}/git/trees/${sha}?recursive=1`);
-    invariant(!tree.truncated, 'Repository tree is incomplete; narrow the submission or review manually');
+    if (tree.truncated) throw pipelineLimit(new Error('Repository tree is incomplete; narrow the submission or review manually'));
     return tree.tree;
   }
   async blob(repo, node, max = 100_000) {
@@ -61,6 +62,29 @@ export class GitHub {
 const manifests = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile']);
 const textExtension = /\.(?:md|mdx|rst|txt|json|[cm]?js|jsx|ts|tsx|py|rs|go|rb|java|kt|swift|php|cs|toml|ya?ml)$/i;
 
+function packageDependencyNames(content) {
+  try {
+    const pkg = JSON.parse(content);
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return [];
+    const names = [];
+    for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
+      const value = pkg[field];
+      if (value && typeof value === 'object' && !Array.isArray(value)) names.push(...Object.keys(value));
+    }
+    return [...new Set(names)].slice(0, 40);
+  } catch { return []; }
+}
+
+function repositoryFacts(metadata, tree, cache) {
+  const topLevel = [...new Set(tree.map(n => n.path.split('/')[0]).filter(Boolean))].sort().slice(0, 80);
+  return {
+    githubAction: tree.some(n => n.path === 'action.yml' || n.path === 'action.yaml'),
+    license: metadata.license?.spdx_id && !['NOASSERTION', 'NONE'].includes(metadata.license.spdx_id) ? metadata.license.spdx_id : null,
+    topLevel,
+    packageDependencies: typeof cache.get('package.json') === 'string' ? packageDependencyNames(cache.get('package.json')) : [],
+  };
+}
+
 export async function collectRepository(github, repo, requestedPaths = [], selectionOptions) {
   repository(repo);
   const metadata = await github.request(`/repos/${repo}`);
@@ -94,11 +118,18 @@ export async function collectRepository(github, repo, requestedPaths = [], selec
   }
   let discovery, selection;
   if (selectionOptions) {
-    selection = await selectSources({ ...selectionOptions, repo, nodes: regular,
-      documents: [...cache].filter(([path]) => path === readme?.path || manifests.has(path)).map(([path, content]) => ({ path, content })) });
-    for (const path of selection.selectedPaths) {
-      try { await read(regular.find(n => n.path === path)); }
-      catch { warnings.push(`Could not read selected source: ${path}`); }
+    try {
+      selection = await selectSources({ ...selectionOptions, repo, nodes: regular,
+        documents: [...cache].filter(([path]) => path === readme?.path || manifests.has(path)).map(([path, content]) => ({ path, content })) });
+      for (const path of selection.selectedPaths) {
+        try { await read(regular.find(n => n.path === path)); }
+        catch { warnings.push(`Could not read selected source: ${path}`); }
+      }
+    } catch (error) {
+      if (classifyReviewError(error).errorKind !== 'pipeline-limit') throw error;
+      if (!requestedPaths.some(path => sourceExtension.test(path))) throw pipelineLimit(error);
+      warnings.push(SOURCE_LIMIT_REMEDY);
+      selection = { method: 'jev', selectedPaths: [], failed: true };
     }
   } else {
     // Retained for offline comparison; production callers explicitly supply selection options.
@@ -130,7 +161,7 @@ export async function collectRepository(github, repo, requestedPaths = [], selec
     ? { ...selection, includedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) }
     : { scannedFiles: discovery.scannedFiles, scannedBytes: discovery.scannedBytes, failedFiles: discovery.failedFiles, candidateFiles: discovery.candidateFiles, selectedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) };
   return {
-    state: { repository: { name: metadata.full_name, description: metadata.description, license: metadata.license?.spdx_id ?? null, archived: metadata.archived, commit: sha }, files: evidence },
+    state: { repository: { name: metadata.full_name, description: metadata.description, license: metadata.license?.spdx_id ?? null, archived: metadata.archived, commit: sha }, facts: repositoryFacts(metadata, tree, cache), files: evidence },
     evidence: evidence.map(({ content, ...source }) => source), warnings, sourceCommit: sha, discovery: discoverySummary,
   };
 }

@@ -64,9 +64,9 @@ External fork submissions work through `pull_request_target`. Never check out, i
 Each check is a positive yes/no criterion with `id`, `title`, `question`, `yes`, `no`, `accept`, and `reject`. All checks are required. One `Choice` question selects among `categories`, which must include `other`. Set `categoryConfidence` to your review boundary.
 
 - **recommended:** all checks pass, a category is supported, and evidence is complete within the configured collector.
-- **needs-review:** ambiguous answers, category disagreement, missing/truncated integration evidence, archive status, or an unrecognized license.
+- **needs-review:** ambiguous answers, category disagreement, missing/truncated integration evidence, archive status, an unrecognized license, or a pipeline limit such as source-selection overflow (add up to six `evidence` paths).
 - **not-recommended:** at least one check fails, with no evidence collection warning.
-- **error:** invalid submission, API failure, or invalid model response; the action fails and does not approve anything.
+- **error:** invalid submission or operator/infrastructure failure; the action fails and does not approve anything.
 - **skipped:** no catalog entry changed, or the PR changed/closed before publication.
 
 `recommended` is advisory, not a GitHub review approval. The action never merges, closes, edits submissions, or applies labels. Outputs let a caller implement additional behavior explicitly. Example thresholds are provisional: use human-labeled examples to measure false acceptance, false rejection, and category agreement before relying on them.
@@ -104,7 +104,9 @@ The collector resolves the submitted repository's default branch to an immutable
 
 Selection is a retrieval hint, not proof of integration. A separate Jev call judges the actual source. The selector targets TypeSafe/Jev; it is not a general-purpose ecosystem selector. No selected or supplied source means maintainer review. Provider errors fail visibly rather than falling back to favorable rule-based results. The old rule selector remains available internally for offline comparisons only.
 
-Catalog files are never truncated: at most ten complete files and 48,000 file-content characters reach the review. A file that cannot fit is omitted with a visible warning requiring maintainer review; smaller subsequent files can still fit. Selection refuses more than 200 candidates, 65,000 serialized state bytes, or 180,000 serialized state-plus-question bytes. These are local resource guards, not exact model token counts; provider context errors remain errors. Ordinary pull-request diff mode retains its separate excerpt behavior.
+Catalog files are never truncated: at most ten complete files and 48,000 file-content characters reach the review. A file that cannot fit is omitted with a visible warning requiring maintainer review; smaller subsequent files can still fit. File selection sends all eligible paths in one shared-state request with one short Noul question per path, not one API call per file. There is no candidate-count or serialized-byte cutoff for selection; the provider enforces model context limits. A context-limit rejection is a pipeline limit, not a PR defect: the review asks for `evidence` paths instead of failing the Action. Other provider errors still fail visibly without truncation or automatic splitting. Ordinary pull-request diff mode retains its separate excerpt behavior.
+
+The collector also sends a bounded `facts` block (GitHub Action file existence, license, top-level paths, and package.json dependency names) so description claims can be checked against filesystem facts even when those files were not selected as source evidence.
 
 The JSON report's `discovery` field records selection candidates, probabilities, selected/included paths, model, token usage, latency, and state/question hashes. Top-level `usage` describes the final review call only; add `discovery.usage` for total model usage. Missing evidence still requires maintainer review; no second retrieval round is implemented. Discovery does not inspect an entire repository or prove that a project works.
 
@@ -121,7 +123,7 @@ The JSON report's `discovery` field records selection candidates, probabilities,
 
 Outputs: `decision`, `category`, and `report-path`. The JSON report includes raw typed answers, token usage, resolved model, source commit, PR head, policy/state hashes, thresholds, evidence URLs and follow-up reasons. It does not contain the API key or complete source files. Changing a threshold can be evaluated against saved answers without another provider call.
 
-Every run costs provider tokens; each catalog project normally uses one Jev file-selection call and one review call containing its checks and category question. Only transient HTTP failures retry, at most twice. GitHub file counts, evidence size, request timeouts, and question counts are bounded. No API keys are needed for CI tests.
+Every run costs provider tokens; each catalog project normally uses one Jev file-selection call and one review call containing its checks and category question. Only transient HTTP failures retry, at most twice. Evidence reads, HTTP response sizes, and request timeouts remain bounded. No API keys are needed for CI tests.
 
 ## Local review
 
