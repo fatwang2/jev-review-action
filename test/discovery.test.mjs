@@ -102,6 +102,40 @@ test('large discovered sources remain visibly incomplete, with bounded reads and
   const result = await collectRepository(github, 'owner/project');
   assert.ok(result.discovery.scannedBytes <= 512_000);
   assert.ok(reads.length <= 6);
-  assert.ok(result.warnings.some(w => w.includes('truncated')));
+  assert.ok(result.warnings.some(w => w.includes('Full file omitted')));
+  assert.ok(result.state.files.every(file => file.truncated === false));
   assert.ok(result.state.files.reduce((n, s) => n + s.content.length, 0) <= 48_000);
+});
+
+test('Jev chooses from document metadata only and selected files are read without truncation', async () => {
+  const source = 'x'.repeat(8500) + '\nclient.system_one();';
+  const { github, reads } = fixture({ 'README.md': 'Run it', 'src/client.ts': source, 'src/unrelated.ts': 'UNRELATED_SOURCE', 'tests/hidden.ts': 'hidden' });
+  const result = await collectRepository(github, 'owner/project', [], {
+    apiKey: 'fixture', model: 'jev-fixture', fetchImpl: async (url, options) => {
+      const request = JSON.parse(options.body);
+      assert.equal(url, 'https://api.typesafe.ai/v1/systemone');
+      assert.deepEqual(request.state.candidates.map(f => f.path), ['src/client.ts', 'src/unrelated.ts']);
+      assert.equal(JSON.stringify(request.state).includes('UNRELATED_SOURCE'), false);
+      assert.equal(JSON.stringify(request.state).includes('client.system_one'), false);
+      return new Response(JSON.stringify({ model: 'jev-fixture', usage: { input_tokens: 10, output_tokens: 2 }, answers: { file_0: { type: 'noul', noul: 0.9 }, file_1: { type: 'noul', noul: 0.1 } } }));
+    },
+  });
+  assert.deepEqual(reads, ['README.md', 'src/client.ts']);
+  assert.equal(result.state.files[1].content, source);
+  assert.equal(result.state.files[1].truncated, false);
+  assert.equal(result.discovery.method, 'jev');
+  assert.equal(result.discovery.usage.input_tokens, 10);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('selector failures are not converted into favorable rule-based results', async () => {
+  const { github } = fixture({ 'README.md': 'Run it', 'src/client.ts': 'client.system_one();' });
+  await assert.rejects(collectRepository(github, 'owner/project', [], { apiKey: 'fixture', model: 'jev-fixture', fetchImpl: async () => new Response('', { status: 401 }) }), /401/);
+});
+
+test('over-budget full files are omitted explicitly and do not hide smaller later files', async () => {
+  const { github } = fixture({ 'README.md': 'r'.repeat(48001), 'src/client.ts': 'client.system_one();' });
+  const result = await collectRepository(github, 'owner/project', ['src/client.ts']);
+  assert.deepEqual(result.evidence.map(f => f.path), ['src/client.ts']);
+  assert.match(result.warnings.join(' '), /Full file omitted.*README/);
 });

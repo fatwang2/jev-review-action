@@ -12,7 +12,7 @@ try {
   if (!values.policy || (!values.entry && !values.repository)) throw new Error('Usage: npm run review -- --policy POLICY.json --entry ENTRY.json [--output REPORT.json]');
   const policy = validatePolicy(JSON.parse(await readFile(values.policy, 'utf8')));
   const submission = values.entry ? validateEntry(JSON.parse(await readFile(values.entry, 'utf8')), policy.categories) : undefined;
-  const collected = await collectRepository(new GitHub(process.env.GITHUB_TOKEN), submission?.repository ?? values.repository, submission?.evidence ?? []);
+  const collected = await collectRepository(new GitHub(process.env.GITHUB_TOKEN), submission?.repository ?? values.repository, submission?.evidence ?? [], { apiKey: process.env.TYPESAFE_API_KEY, model: values.model });
   const report = await review({ policy, collected, submission, apiKey: process.env.TYPESAFE_API_KEY, model: values.model });
   const output = resolve(values.output);
   await mkdir(dirname(output), { recursive: true });

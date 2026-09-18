@@ -20,7 +20,7 @@ export async function reviewCatalog({ files, pull, github, policy, context, apiK
         const submission = validateEntry(await github.entryAt(treeRepo, pull.head.sha, file.filename), policy.categories);
         invariant(file.filename === `${policy.entryDirectory}/${entryFilename(submission.repository)}`, 'Entry filename must match owner--repository.json in lowercase');
         entryContext.projectRepository = submission.repository;
-        const collected = await collectRepository(github, submission.repository, submission.evidence);
+        const collected = await collectRepository(github, submission.repository, submission.evidence, { apiKey, model });
         reports[index] = await review({ policy, collected, submission, apiKey, model, context: entryContext });
       } catch (error) {
         reports[index] = { schemaVersion: 1, ...entryContext, policyHash: hash(policy), reviewedAt: new Date().toISOString(), decision: 'error', reasons: [error.message] };

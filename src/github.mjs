@@ -1,6 +1,7 @@
 import { jsonRequest } from './http.mjs';
 import { invariant, repository, relativePath } from './validation.mjs';
 import { discoverSources, sourceExtension } from './discovery.mjs';
+import { selectSources } from './selection.mjs';
 
 export const encodePath = path => relativePath(path).split('/').map(part => encodeURIComponent(part).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)).join('/');
 const shaPattern = /^[0-9a-f]{40}$/;
@@ -60,7 +61,7 @@ export class GitHub {
 const manifests = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile']);
 const textExtension = /\.(?:md|mdx|rst|txt|json|[cm]?js|jsx|ts|tsx|py|rs|go|rb|java|kt|swift|php|cs|toml|ya?ml)$/i;
 
-export async function collectRepository(github, repo, requestedPaths = []) {
+export async function collectRepository(github, repo, requestedPaths = [], selectionOptions) {
   repository(repo);
   const metadata = await github.request(`/repos/${repo}`);
   invariant(metadata.private === false, 'Only public submitted repositories are supported');
@@ -91,31 +92,43 @@ export async function collectRepository(github, repo, requestedPaths = []) {
     try { await read(tree.find(n => n.path === path)); }
     catch { warnings.push(`Could not read evidence file: ${path}`); }
   }
-  const discovery = await discoverSources({
-    nodes: regular.filter(n => !attempted.has(n.path)),
-    seeds: [...cache].map(([path, content]) => ({ path, content })), read,
-  });
-  const discoveredPaths = discovery.matches.map(s => s.path);
-  const paths = [...new Set([...initialPaths, ...discoveredPaths])].slice(0, 10);
+  let discovery, selection;
+  if (selectionOptions) {
+    selection = await selectSources({ ...selectionOptions, repo, nodes: regular,
+      documents: [...cache].filter(([path]) => path === readme?.path || manifests.has(path)).map(([path, content]) => ({ path, content })) });
+    for (const path of selection.selectedPaths) {
+      try { await read(regular.find(n => n.path === path)); }
+      catch { warnings.push(`Could not read selected source: ${path}`); }
+    }
+  } else {
+    // Retained for offline comparison; production callers explicitly supply selection options.
+    discovery = await discoverSources({
+      nodes: regular.filter(n => !attempted.has(n.path)),
+      seeds: [...cache].map(([path, content]) => ({ path, content })), read,
+    });
+  }
+  const discoveredPaths = selection?.selectedPaths ?? discovery.matches.map(s => s.path);
+  const paths = [...new Set([...initialPaths, ...discoveredPaths])];
   const evidence = [];
   let budget = 48_000;
   for (const path of paths) {
     const content = cache.get(path);
     if (content === undefined) continue;
-    const limit = Math.min(path === readme?.path ? 14_000 : 8000, budget);
-    if (limit <= 0) { warnings.push('Evidence budget exhausted'); break; }
-    const excerpt = content.slice(0, limit);
-    const truncated = excerpt.length < content.length;
-    if (truncated && (requestedPaths.includes(path) || sourceExtension.test(path))) warnings.push(`Evidence was truncated: ${path}; supply a smaller integration file in evidence or review the full source manually`);
+    if (content.length > budget || evidence.length >= 10) {
+      warnings.push(`Full file omitted because it exceeds the evidence budget: ${path}; maintainer review required`);
+      continue;
+    }
     const node = tree.find(n => n.path === path);
-    evidence.push({ path, url: `https://github.com/${repo}/blob/${sha}/${encodePath(path)}`, sha: node.sha, truncated, content: excerpt });
-    budget -= excerpt.length;
+    evidence.push({ path, url: `https://github.com/${repo}/blob/${sha}/${encodePath(path)}`, sha: node.sha, truncated: false, content });
+    budget -= content.length;
   }
   const suppliedSource = evidence.some(s => requestedPaths.includes(s.path) && sourceExtension.test(s.path));
   const discoveredSource = evidence.some(s => sourceExtension.test(s.path) && discoveredPaths.includes(s.path));
   if (!suppliedSource && !discoveredSource) warnings.push('Automatic discovery could not find enough integration source evidence. Add 1–6 relative source file paths in the optional evidence field so a maintainer can review the integration.');
   invariant(evidence.length > 0, 'No readable repository evidence');
-  const discoverySummary = { scannedFiles: discovery.scannedFiles, scannedBytes: discovery.scannedBytes, failedFiles: discovery.failedFiles, candidateFiles: discovery.candidateFiles, selectedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) };
+  const discoverySummary = selection
+    ? { ...selection, includedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) }
+    : { scannedFiles: discovery.scannedFiles, scannedBytes: discovery.scannedBytes, failedFiles: discovery.failedFiles, candidateFiles: discovery.candidateFiles, selectedPaths: evidence.filter(s => discoveredPaths.includes(s.path)).map(s => s.path) };
   return {
     state: { repository: { name: metadata.full_name, description: metadata.description, license: metadata.license?.spdx_id ?? null, archived: metadata.archived, commit: sha }, files: evidence },
     evidence: evidence.map(({ content, ...source }) => source), warnings, sourceCommit: sha, discovery: discoverySummary,

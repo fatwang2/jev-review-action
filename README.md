@@ -100,11 +100,13 @@ Use `entries/owner--repository.json` (lowercase). Submit one file per project, u
 
 The file name is the canonical repository identity and prevents duplicate filenames. The directory's own validation should also check its full catalog for duplicates. Only public GitHub source repositories are supported in catalog mode. Non-GitHub projects and arbitrary webpages need a future evidence adapter, not unrestricted URL fetching.
 
-The collector resolves the submitted repository's default branch to an immutable commit. It reads the root README, up to six optional evidence paths, and up to two root manifests, then follows source references and prioritizes likely entrypoints, clients, and Jev/TypeSafe-related paths. Automatic discovery inspects at most 24 additional source files and 512 KB of declared blob sizes; each file is limited to 100 KB. Dependencies, generated output, tests, fixtures, symlinks, and submodules are excluded from automatic candidates. Explicit evidence can still point to a regular supported test or example file.
+The collector resolves the submitted repository's default branch to an immutable commit. Jev selects up to six source files using the complete root README, up to two root manifests, and candidate paths/sizes, without seeing source contents or submission evidence hints. Each candidate receives a Noul judgment; candidates scoring at least 0.5 are ranked by probability, then path. Dependencies, generated output, tests, fixtures, symlinks, and submodules are excluded from automatic candidates; source files are limited to 100 KB. Up to six optional evidence paths are read in addition to the selected files. Explicit evidence can still point to a regular supported test or example file.
 
-Provider URLs, SDK imports, and model IDs are retrieval hints, not proof of integration. Jev makes the semantic judgment. The default discovery hints target TypeSafe/Jev; directories about other ecosystems should supply explicit evidence paths. If discovery finds no integration source and no readable source path was supplied, the result requires maintainer review and asks the contributor to add paths. A README claim alone cannot bypass that fallback.
+Selection is a retrieval hint, not proof of integration. A separate Jev call judges the actual source. The selector targets TypeSafe/Jev; it is not a general-purpose ecosystem selector. No selected or supplied source means maintainer review. Provider errors fail visibly rather than falling back to favorable rule-based results. The old rule selector remains available internally for offline comparisons only.
 
-At most ten text excerpts and 48,000 file-content characters reach Jev. Truncated integration evidence requires manual review. The report includes discovery counts and selected paths. Discovery is bounded and may miss code; it does not inspect an entire repository or prove that a project works. Source links identify files inspected, not model-generated citations to individual claims.
+Catalog files are never truncated: at most ten complete files and 48,000 file-content characters reach the review. A file that cannot fit is omitted with a visible warning requiring maintainer review; smaller subsequent files can still fit. Selection refuses more than 200 candidates, 65,000 serialized state bytes, or 180,000 serialized state-plus-question bytes. These are local resource guards, not exact model token counts; provider context errors remain errors. Ordinary pull-request diff mode retains its separate excerpt behavior.
+
+The JSON report's `discovery` field records selection candidates, probabilities, selected/included paths, model, token usage, latency, and state/question hashes. Top-level `usage` describes the final review call only; add `discovery.usage` for total model usage. Missing evidence still requires maintainer review; no second retrieval round is implemented. Discovery does not inspect an entire repository or prove that a project works.
 
 ## Inputs and outputs
 
@@ -119,7 +121,7 @@ At most ten text excerpts and 48,000 file-content characters reach Jev. Truncate
 
 Outputs: `decision`, `category`, and `report-path`. The JSON report includes raw typed answers, token usage, resolved model, source commit, PR head, policy/state hashes, thresholds, evidence URLs and follow-up reasons. It does not contain the API key or complete source files. Changing a threshold can be evaluated against saved answers without another provider call.
 
-Every run costs provider tokens; each project normally uses one Jev call containing its checks and category question. Only transient HTTP failures retry, at most twice. GitHub file counts, evidence size, request timeouts, and question counts are bounded. No API keys are needed for CI tests.
+Every run costs provider tokens; each catalog project normally uses one Jev file-selection call and one review call containing its checks and category question. Only transient HTTP failures retry, at most twice. GitHub file counts, evidence size, request timeouts, and question counts are bounded. No API keys are needed for CI tests.
 
 ## Local review
 

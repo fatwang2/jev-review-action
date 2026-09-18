@@ -36,6 +36,8 @@ async function runAction({ moveHead = false, staleEvent = false, modelFails = fa
         activeModels--;
         const project = JSON.stringify(JSON.parse(opts.body).state);
         if (modelFails === true || typeof modelFails === 'string' && project.includes(modelFails)) return new Response('sensitive provider detail', { status: 401 });
+        const request = JSON.parse(opts.body);
+        if (request.questions.file_0) return json({ model: 'jev-fixture', usage: { input_tokens: 8, output_tokens: 1 }, answers: Object.fromEntries(Object.keys(request.questions).map(id => [id, { type: 'noul', noul: 0.9 }])) });
         return json({ model: 'jev-fixture', usage: { input_tokens: 12, output_tokens: 4 }, answers: { scope_match: { type: 'noul', noul: rejected && project.includes(rejected) ? 0.1 : uncertain && project.includes(uncertain) ? 0.5 : 0.95 }, category: { type: 'choice', choice: 'documentation', confidence: 0.9, probabilities: { documentation: 1, bugfix: 0, feature: 0, maintenance: 0, other: 0 } } } });
       }
       if (entries && !url.startsWith('https://api.github.com/repos/owner/catalog/')) {
@@ -111,12 +113,13 @@ test('submitted head checkout is refused before any provider call', async () => 
 
 test('batch preserves independent judgments and one summary comment', async () => {
   const run = await runAction({ entries: ['alpha', 'beta', 'gamma'], rejected: 'owner/beta', uncertain: 'owner/gamma' });
-  assert.equal(run.modelCalls, 3);
+  assert.equal(run.modelCalls, 6);
   assert.equal(run.writes.length, 1);
   assert.equal(run.report.schemaVersion, 2);
   assert.equal(run.report.decision, 'not-recommended');
   assert.deepEqual(run.report.reports.map(r => [r.projectRepository, r.decision]), [['owner/alpha', 'recommended'], ['owner/beta', 'not-recommended'], ['owner/gamma', 'needs-review']]);
   assert.ok(run.report.reports.every(r => r.answers && r.sourceCommit === head && r.policyHash && r.evidence.length === 2));
+  assert.ok(run.report.reports.every(r => r.discovery.method === 'jev' && r.discovery.answers.file_0.noul === 0.9));
   assert.equal(run.writes[0].body.split('<!-- jev-review-action:v1 -->').length, 2);
   assert.match(run.writes[0].body, /<details>/);
   assert.match(run.outputs, /category<<[^\n]+\n\n/);
@@ -126,7 +129,7 @@ test('invalid entry and provider failure do not discard successful siblings', as
   const run = await runAction({ entries: ['bad', 'alpha', 'beta'], entryFailure: 'bad', modelFails: 'owner/alpha' });
   assert.equal(run.report.decision, 'error');
   assert.equal(run.exitCode, 1);
-  assert.equal(run.modelCalls, 2);
+  assert.equal(run.modelCalls, 3);
   assert.deepEqual(run.report.reports.map(r => r.decision), ['error', 'error', 'recommended']);
   assert.ok(!JSON.stringify(run).includes('sensitive provider detail'));
 });
@@ -137,7 +140,7 @@ test('batch boundaries and single-entry compatibility', async () => {
   assert.equal(single.report.category, 'documentation');
   assert.equal(single.report.reports, undefined);
   const ten = await runAction({ entries: Array.from({ length: 10 }, (_, i) => `p${i}`) });
-  assert.equal(ten.modelCalls, 10);
+  assert.equal(ten.modelCalls, 20);
   assert.equal(ten.maxActiveModels, 2);
   assert.equal(ten.report.decision, 'recommended');
   for (const options of [{ entries: Array.from({ length: 11 }, (_, i) => `p${i}`) }, { entries: ['alpha', 'beta'], removed: true }]) {
