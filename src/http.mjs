@@ -1,12 +1,12 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export async function jsonRequest(url, { token, method = 'GET', body, fetchImpl = fetch, attempts = 1, maxBytes = 8_000_000 } = {}) {
+export async function jsonRequest(url, { token, method = 'GET', body, fetchImpl = fetch, attempts = 1, maxBytes = 8_000_000, headers = {} } = {}) {
   for (let attempt = 0; attempt < attempts; attempt++) {
     let response;
     try {
       response = await fetchImpl(url, {
         method, redirect: 'error', signal: AbortSignal.timeout(30_000),
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'jev-review-action', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'jev-review-action', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch {

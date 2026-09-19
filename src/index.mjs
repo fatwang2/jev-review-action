@@ -10,6 +10,7 @@ import { review } from './review.mjs';
 import { reviewCatalog } from './catalog.mjs';
 import { MARKER, renderComment } from './render.mjs';
 import { classifyReviewError } from './errors.mjs';
+import { judgeConfig } from './jev.mjs';
 
 const input = name => process.env[`INPUT_${name.toUpperCase()}`] ?? '';
 const contained = (root, path) => { const rel = relative(root, path); return rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel); };
@@ -41,7 +42,14 @@ export async function main() {
     invariant(pull.state === 'open', 'PR is no longer open');
     const files = await github.changedFiles(repo, number);
     invariant(files.length === pull.changed_files, 'Incomplete PR file list');
-    const options = { policy, apiKey: input('typesafe-api-key'), model: input('model') || 'jev-latest', context };
+    // Provider credentials are read here and never written to the report.
+    const judge = judgeConfig({
+      providers: input('jev-providers'),
+      typesafeApiKey: input('typesafe-api-key'), typesafeModel: input('model'),
+      aiGatewayApiKey: input('ai-gateway-api-key'), aiGatewayModel: input('ai-gateway-model'),
+      cloudflareAccountId: input('cloudflare-account-id'), cloudflareApiToken: input('cloudflare-api-token'), cloudflareModel: input('cloudflare-ai-model'),
+    });
+    const options = { policy, judge, context };
     if (policy.mode === 'catalog') {
       report = await reviewCatalog({ ...options, files, pull, github });
     } else report = await review({ ...options, collected: collectPullRequest(pull, files) });

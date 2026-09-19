@@ -4,7 +4,7 @@ import { hash } from './policy.mjs';
 import { entryFilename, invariant, repository, validateEntry } from './validation.mjs';
 import { classifyReviewError } from './errors.mjs';
 
-export async function reviewCatalog({ files, pull, github, policy, context, apiKey, model }) {
+export async function reviewCatalog({ files, pull, github, policy, context, judge }) {
   const entries = files.filter(file => file.filename.startsWith(`${policy.entryDirectory}/`));
   if (!entries.length) return { ...context, decision: 'skipped', reasons: ['This PR does not change catalog entries'] };
   invariant(entries.length <= 10 && entries.length === files.length, 'Submit 1–10 entry files per PR, without workflow, policy, or generated-file changes');
@@ -21,8 +21,8 @@ export async function reviewCatalog({ files, pull, github, policy, context, apiK
         const submission = validateEntry(await github.entryAt(treeRepo, pull.head.sha, file.filename), policy.categories);
         invariant(file.filename === `${policy.entryDirectory}/${entryFilename(submission.repository)}`, 'Entry filename must match owner--repository.json in lowercase');
         entryContext.projectRepository = submission.repository;
-        const collected = await collectRepository(github, submission.repository, submission.evidence, { apiKey, model });
-        reports[index] = await review({ policy, collected, submission, apiKey, model, context: entryContext });
+        const collected = await collectRepository(github, submission.repository, submission.evidence, { judge });
+        reports[index] = await review({ policy, collected, submission, judge, context: entryContext });
       } catch (error) {
         reports[index] = { schemaVersion: 1, ...entryContext, policyHash: hash(policy), reviewedAt: new Date().toISOString(), ...classifyReviewError(error) };
       }

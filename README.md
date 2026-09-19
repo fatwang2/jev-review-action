@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/fatwang2/jev-review-action/actions/workflows/ci.yml/badge.svg)](https://github.com/fatwang2/jev-review-action/actions/workflows/ci.yml)
 
-Review submissions and classify pull requests with [TypeSafe Jev](https://typesafe.ai). You define the criteria and categories; Jev returns typed judgments; code applies the policy and updates one PR comment.
+Review submissions and classify pull requests with [TypeSafe Jev](https://typesafe.ai). You define the criteria and categories; Jev returns typed judgments; code applies the policy and updates one PR comment. Jev can be reached through TypeSafe, Vercel AI Gateway or Cloudflare Workers AI, with an ordered fallback chain (see [Jev providers](#jev-providers)).
 
 **Only Jev is used.** Comments come from a fixed template. There is no text-generation model, autonomous agent, or hosted bot server.
 
@@ -20,7 +20,7 @@ Policies are JSON. The action does not hardcode Jev ecosystem criteria: replace 
 ## Quick start
 
 1. Copy an example policy to `.github/jev-review.json` on your default branch.
-2. Set the repository secret `TYPESAFE_API_KEY` to your own TypeSafe key.
+2. Set the repository secret `TYPESAFE_API_KEY` to your own TypeSafe key, or configure another [Jev provider](#jev-providers).
 3. Add the workflow below to the default branch. It only runs trusted base-branch code. For production, replace the action version with the full commit SHA from the release.
 
 ```yaml
@@ -116,16 +116,54 @@ The JSON report's `discovery` field records selection candidates, probabilities,
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `typesafe-api-key` | required | TypeSafe key, sent only to `api.typesafe.ai` |
+| `jev-providers` | `typesafe` | Enabled Jev providers in order of preference: `typesafe`, `vercel`, `cloudflare` |
+| `typesafe-api-key` | | TypeSafe key, sent only to `api.typesafe.ai`; enables `typesafe` |
+| `ai-gateway-api-key` | | Vercel AI Gateway key, sent only to `ai-gateway.vercel.sh`; enables `vercel` |
+| `cloudflare-account-id`, `cloudflare-api-token` | | Cloudflare account and Workers AI token, sent only to `api.cloudflare.com`; enable `cloudflare` |
 | `github-token` | `github.token` | Read evidence and write PR comments |
 | `policy` | `.github/jev-review.json` | Trusted policy file |
-| `model` | `jev-latest` | Jev model ID; pin a version for comparisons |
+| `model` | `jev-latest` | Jev model ID sent to TypeSafe; pin a version for comparisons |
+| `ai-gateway-model` | `typesafe-ai/jev` | Model ID sent to Vercel AI Gateway |
+| `cloudflare-ai-model` | `typesafe/jev` | Model ID run through Cloudflare Workers AI |
 | `comment` | `true` | Set `false` for report-only use |
 | `report-path` | `jev-report.json` | JSON report in the workspace |
 
-Outputs: `decision`, `category`, and `report-path`. The JSON report includes raw typed answers, token usage, resolved model, source commit, PR head, policy/state hashes, thresholds, evidence URLs and follow-up reasons. It does not contain the API key or complete source files. Changing a threshold can be evaluated against saved answers without another provider call.
+Outputs: `decision`, `category`, and `report-path`. The JSON report includes raw typed answers, token usage, resolved model, the provider that answered (`judge`), source commit, PR head, policy/state hashes, thresholds, evidence URLs and follow-up reasons. It does not contain the API key or complete source files. Changing a threshold can be evaluated against saved answers without another provider call.
 
-Every run costs provider tokens; each catalog project normally uses one Jev file-selection call and one review call containing its checks and category question. Only transient HTTP failures retry, at most twice. Evidence reads, HTTP response sizes, and request timeouts remain bounded. No API keys are needed for CI tests.
+Every run costs provider tokens; each catalog project normally uses one Jev file-selection call and one review call containing its checks and category question. Only transient HTTP failures retry, at most twice per provider. Evidence reads, HTTP response sizes, and request timeouts remain bounded. No API keys are needed for CI tests.
+
+### Jev providers
+
+Jev is served by three services that answer the same questions. Any one is enough; the others are optional fallbacks.
+
+| Provider | How it is called | Inputs |
+| --- | --- | --- |
+| `typesafe` | TypeSafe's own API, `api.typesafe.ai/v1/systemone` | `typesafe-api-key` |
+| `vercel` | Vercel AI Gateway evaluation-model endpoint, model `typesafe-ai/jev` | `ai-gateway-api-key` |
+| `cloudflare` | Cloudflare Workers AI REST API, model `typesafe/jev` | `cloudflare-account-id`, `cloudflare-api-token` |
+
+`jev-providers` is the switch. Only listed providers are used, in the order given; the default is `typesafe` alone. Providers not listed stay off even when their credentials are set, so adding a secret never changes behavior by itself. The first listed provider with credentials is primary and the rest are fallbacks; a listed provider without credentials is skipped, and a run with no configured provider fails before any GitHub or model call.
+
+```yaml
+      - uses: fatwang2/jev-review-action@v0.2.0
+        with:
+          jev-providers: typesafe,vercel,cloudflare
+          typesafe-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          ai-gateway-api-key: ${{ secrets.AI_GATEWAY_API_KEY }}
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
+A request moves to the next provider only when the current one fails with HTTP 402 (no credit), 429 (throttled) or 5xx after its own transient retries. Client errors such as 400 or 401 are not retried elsewhere, and answers from every provider pass the same validation, so a fallback can never produce a more favorable result than a malformed answer would. Each hop is logged as `Jev provider <name> returned HTTP <status>; retrying with <next>`, and the report's `judge` field and the comment's `Model:` line name the provider that answered.
+
+Provider notes:
+
+- **TypeSafe** bills per token to your TypeSafe organization; without credit it returns 402.
+- **Vercel** free-tier teams are rate-limited per model and return 429 after a few requests; any purchased AI Gateway credit moves the team to the paid tier. The gateway's `boolean` answers map to Jev's `noul` probabilities and Jev's confidence is read from the gateway's provider metadata; a choice answer without a probability distribution is rejected like any other malformed answer.
+- **Cloudflare** needs an API token with Workers AI permission and the account ID; there is no Workers binding in GitHub Actions. Jev is billed to Cloudflare AI Gateway credits; an exhausted balance is reported inside the REST envelope and treated as 402.
+- Model inputs accept only Jev model IDs in each provider's naming (`jev-*`, `typesafe-ai/jev*`, `typesafe/jev*`).
+
+The local CLI reads the same switches from the environment: `JEV_PROVIDERS`, `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` and the optional `AI_GATEWAY_MODEL`/`CLOUDFLARE_AI_MODEL`.
 
 ## Local review
 
@@ -142,7 +180,7 @@ The CLI only writes a local report. It does not post to GitHub. `--repository ow
 
 ## Data and permissions
 
-PR title/body/diff in PR mode, or submitted descriptions and public repository excerpts in catalog mode, are sent to TypeSafe. Do not enable it on private PR data unless this transfer is intended. GitHub requests go only to `api.github.com`, model calls only to `api.typesafe.ai`, and redirects are rejected. Retrieved text is untrusted evidence; model judgments are advisory and cannot grant permissions.
+PR title/body/diff in PR mode, or submitted descriptions and public repository excerpts in catalog mode, are sent to the Jev provider that answers: TypeSafe directly, or Vercel AI Gateway or Cloudflare Workers AI, which forward to TypeSafe. Do not enable it on private PR data unless this transfer is intended. GitHub requests go only to `api.github.com`, model calls only to `api.typesafe.ai`, `ai-gateway.vercel.sh` and `api.cloudflare.com` for the providers you enable, and redirects are rejected. Retrieved text is untrusted evidence; model judgments are advisory and cannot grant permissions.
 
 Use the standard `GITHUB_TOKEN` for one-comment updates: the action only edits comments authored by `github-actions[bot]` with its marker. A fresh PR-head check suppresses stale results; keep the workflow concurrency group to serialize reviews of one PR. Reports identify the reviewed head so changes remain visible.
 
@@ -150,6 +188,6 @@ Use the standard `GITHUB_TOKEN` for one-comment updates: the action only edits c
 
 `npm test` covers policy decisions, malformed model answers, bounded evidence, symlinks, unsafe paths, private-source refusal, comment ownership/pagination, stale PR suppression, trusted checkout enforcement, and a mocked end-to-end action run. These tests validate software behavior, not Jev's classification accuracy.
 
-Live calibration is not yet published. Configure a dedicated TypeSafe key and compare saved reports against human labels before claiming accuracy or enabling downstream automation.
+Live calibration is not yet published. Configure a dedicated Jev provider key and compare saved reports against human labels before claiming accuracy or enabling downstream automation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). MIT licensed; TypeSafe and Jev names belong to their respective owners.
