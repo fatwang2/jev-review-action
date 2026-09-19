@@ -46,7 +46,7 @@ export function renderComment(report) {
     lines.push('');
   }
   if (report.headSha) lines.push(`PR commit: \`${report.headSha}\``);
-  if (report.model) lines.push(`Model: \`${markdown(report.model)}\` · policy: \`${report.policyHash.slice(0, 12)}\` · input tokens: ${report.usage.input_tokens}`);
+  if (report.model) lines.push(`Model: \`${markdown(report.model)}\`${report.judge ? ` via ${markdown(report.judge)}` : ''} · policy: \`${report.policyHash.slice(0, 12)}\` · input tokens: ${report.usage.input_tokens}`);
   if (report.runUrl) lines.push(`[Review run and JSON report](${report.runUrl})`);
   lines.push('', 'Model judgments use Jev only; this comment is generated from a template. Probabilities are model judgments, not verified accuracy. A maintainer decides whether to merge.');
   return lines.join('\n');

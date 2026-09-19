@@ -1,4 +1,4 @@
-import { jsonRequest } from './http.mjs';
+import { judgeConfig, systemOne } from './jev.mjs';
 import { invariant, object, probability, text } from './validation.mjs';
 
 export function validateAnswers(response, questions) {
@@ -29,12 +29,18 @@ export function validateAnswers(response, questions) {
   return { model: response.model, answers, usage: { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens } };
 }
 
-export async function evaluate({ apiKey, model = 'jev-latest', state, questions, fetchImpl }) {
-  invariant(typeof apiKey === 'string' && apiKey.trim().length > 0, 'TypeSafe API key is missing');
-  invariant(/^jev-[a-zA-Z0-9.-]+$/.test(model), 'Only Jev model IDs are supported');
+/**
+ * One evaluation through the Jev provider chain. Pass `judge` from
+ * judgeConfig(); `apiKey`/`model` alone is the TypeSafe-only shorthand.
+ * Answers from every provider pass the same validation, and `judge` in the
+ * result names the provider that answered.
+ */
+export async function evaluate({ judge, apiKey, model, state, questions, fetchImpl }) {
+  if (!judge) {
+    invariant(typeof apiKey === 'string' && apiKey.trim().length > 0, 'TypeSafe API key is missing');
+    judge = judgeConfig({ typesafeApiKey: apiKey, typesafeModel: model });
+  }
   const started = Date.now();
-  const response = await jsonRequest('https://api.typesafe.ai/v1/systemone', {
-    token: apiKey, method: 'POST', body: { model, state, questions }, fetchImpl, attempts: 3, maxBytes: 200_000,
-  });
-  return { ...validateAnswers(response, questions), latencyMs: Date.now() - started };
+  const { provider, ...response } = await systemOne(judge, { state, questions, fetchImpl });
+  return { ...validateAnswers(response, questions), judge: provider, latencyMs: Date.now() - started };
 }

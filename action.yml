@@ -5,9 +5,24 @@ branding:
   icon: check-circle
   color: blue
 inputs:
+  jev-providers:
+    description: >-
+      Enabled Jev providers in order of preference, comma-separated: typesafe, vercel, cloudflare.
+      Providers not listed stay off even when their credentials are set. The first listed provider
+      with credentials is primary; the rest are fallbacks on HTTP 402, 429 and 5xx.
+    default: typesafe
   typesafe-api-key:
-    description: TypeSafe API key. Only sent to api.typesafe.ai.
-    required: true
+    description: TypeSafe API key; enables the typesafe provider. Only sent to api.typesafe.ai.
+    required: false
+  ai-gateway-api-key:
+    description: Vercel AI Gateway API key; enables the vercel provider. Only sent to ai-gateway.vercel.sh.
+    required: false
+  cloudflare-account-id:
+    description: Cloudflare account ID for the Workers AI REST API; enables the cloudflare provider together with cloudflare-api-token.
+    required: false
+  cloudflare-api-token:
+    description: Cloudflare API token with Workers AI read permission. Only sent to api.cloudflare.com.
+    required: false
   github-token:
     description: GitHub token with contents read and pull-requests write permissions.
     default: ${{ github.token }}
@@ -15,8 +30,14 @@ inputs:
     description: Path to a trusted JSON policy from the base branch checkout.
     default: .github/jev-review.json
   model:
-    description: TypeSafe model ID. Pin a version for reproducible comparisons.
+    description: Jev model ID sent to TypeSafe. Pin a version for reproducible comparisons.
     default: jev-latest
+  ai-gateway-model:
+    description: Model ID sent to Vercel AI Gateway.
+    default: typesafe-ai/jev
+  cloudflare-ai-model:
+    description: Model ID run through Cloudflare Workers AI.
+    default: typesafe/jev
   comment:
     description: Create or update one bot comment on the pull request.
     default: 'true'

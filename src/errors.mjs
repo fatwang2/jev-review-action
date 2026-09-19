@@ -5,7 +5,7 @@ const PR_DEFECT = /submit 1–10 entry files|removal or rename requires|entry fi
 export function classifyReviewError(error) {
   const message = typeof error?.message === 'string' && error.message ? error.message : 'Review failed';
   if (PR_DEFECT.test(message)) return { decision: 'error', errorKind: 'pr-defect', reasons: [message] };
-  if (error?.pipelineLimit === true || /Repository tree is incomplete|Too many source candidates|api\.typesafe\.ai returned HTTP 422/.test(message)) {
+  if (error?.pipelineLimit === true || /Repository tree is incomplete|Too many source candidates|returned HTTP 422\b/.test(message)) {
     return { decision: 'needs-review', errorKind: 'pipeline-limit', reasons: [SOURCE_LIMIT_REMEDY] };
   }
   return { decision: 'error', errorKind: 'infra', reasons: [message] };

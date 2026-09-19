@@ -17,13 +17,13 @@ export function selectedPaths(candidates, answers) {
     .slice(0, MAX_SELECTED).map(file => file.path);
 }
 
-export async function selectSources({ repo, nodes, documents, apiKey, model, fetchImpl }) {
+export async function selectSources({ repo, nodes, documents, judge, apiKey, model, fetchImpl }) {
   const candidates = sourceCandidates(nodes).sort((a, b) => a.path.localeCompare(b.path, 'en')).map(n => ({ path: n.path, size: n.size }));
   const state = { repository: repo, documents, candidates };
   if (!candidates.length) return { method: 'jev', candidates, selectedPaths: [], stateHash: hash(state) };
   const questions = selectionQuestions(candidates);
   // One shared-state request, not one call per file. The provider enforces its
   // model-specific token limits; do not infer them from file counts or bytes.
-  const result = await evaluate({ apiKey, model, state, questions, fetchImpl });
+  const result = await evaluate({ judge, apiKey, model, state, questions, fetchImpl });
   return { method: 'jev', candidates, selectedPaths: selectedPaths(candidates, result.answers), stateHash: hash(state), questionsHash: hash(questions), ...result };
 }
